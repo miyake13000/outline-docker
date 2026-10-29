@@ -1,4 +1,4 @@
-# Run Outline Locally
+# outline-docker
 
 English | [日本語](README_ja.md)
 
