@@ -1,0 +1,18 @@
+issuer: {{ getenv "DEX_ISSUER" | data.ToJSON }}
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  responseTypes: [code]
+  skipApprovalScreen: true
+staticClients:
+  - id: outline
+    name: Outline
+    secretEnv: OIDC_CLIENT_SECRET
+    redirectURIs:
+      - {{ printf "%s/auth/oidc.callback" (getenv "OUTLINE_URL") | data.ToJSON }}
+enablePasswordDB: true
+staticPasswords: {{ getenv "DEX_USERS_JSON" | required "Run python3 scripts/dex-users.py add EMAIL --no-apply" }}

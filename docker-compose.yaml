@@ -1,0 +1,127 @@
+name: outline
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  init-data:
+    image: alpine:3.22
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - ./data:/data
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p /data/outline /data/postgres /data/redis /data/dex
+        chown 1001:1001 /data/outline /data/dex
+        chmod 700 /data/outline /data/dex
+
+  outline:
+    <<: *defaults
+    image: docker.getoutline.com/outlinewiki/outline:${OUTLINE_VERSION:?Set OUTLINE_VERSION in .env}
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      URL: ${OUTLINE_URL:-http://localhost:3000}
+      PORT: "3000"
+      DATABASE_URL: postgres://outline:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/outline
+      PGSSLMODE: disable
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      UTILS_SECRET: ${UTILS_SECRET:?Set UTILS_SECRET in .env}
+      FORCE_HTTPS: "false"
+      PROXY_HEADERS_TRUSTED: "false"
+      FILE_STORAGE: local
+      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
+      OIDC_ISSUER_URL: ""
+      OIDC_CLIENT_ID: outline
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set OIDC_CLIENT_SECRET in .env}
+      OIDC_AUTH_URI: ${DEX_URL:-http://localhost:5556}/dex/auth
+      OIDC_TOKEN_URI: http://dex:5556/dex/token
+      OIDC_USERINFO_URI: http://dex:5556/dex/userinfo
+      OIDC_DISPLAY_NAME: Local account
+      OIDC_SCOPES: openid profile email
+      OIDC_DISABLE_REDIRECT: "true"
+    ports:
+      - "${OUTLINE_BIND_ADDRESS:-127.0.0.1}:${OUTLINE_PORT:-3000}:3000"
+    volumes:
+      - ./data/outline:/var/lib/outline/data
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dex:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'wget -qO- http://127.0.0.1:3000/_health | grep -q OK']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  postgres:
+    <<: *defaults
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: outline
+      POSTGRES_DB: outline
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, pg_isready, -U, outline, -d, outline]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dex:
+    <<: *defaults
+    image: ghcr.io/dexidp/dex:${DEX_VERSION:-v2.46.1}
+    command: [dex, serve, /etc/dex/config.yaml]
+    env_file: ./dex/users.env
+    environment:
+      DEX_ISSUER: ${DEX_URL:-http://localhost:5556}/dex
+      OUTLINE_URL: ${OUTLINE_URL:-http://localhost:3000}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set OIDC_CLIENT_SECRET in .env}
+    ports:
+      - "127.0.0.1:${DEX_PORT:-5556}:5556"
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./data/dex:/var/dex
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:5556/dex/.well-known/openid-configuration]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    <<: *defaults
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, "yes", --maxmemory-policy, noeviction]
+    volumes:
+      - ./data/redis:/data
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 10

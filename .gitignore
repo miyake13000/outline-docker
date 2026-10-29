@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+backups/
+data/
+__pycache__/
+*.pyc
+dex/users.env
+dex/.users.lock
+dex/.users.env*
